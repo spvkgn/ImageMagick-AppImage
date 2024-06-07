@@ -1,0 +1,76 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+    steps:
+      - name: Install build dependencies
+        env:
+          PACKAGES: >
+            fonts-dejavu-extra libfribidi-dev libfreetype-dev libfontconfig1-dev gsfonts ghostscript
+            zlib1g-dev liblzma-dev libbz2-dev libzstd-dev
+            libx11-dev libxext-dev libxt-dev
+            libdjvulibre-dev libexif-dev libgd-dev libgraphviz-dev libjpeg-dev libopenjp2-7-dev libopenexr-dev
+            libpng-dev libraw-dev libtiff-dev libwmf-dev libwebp-dev libpango1.0-dev librsvg2-bin librsvg2-dev
+            libxml2-dev libraqm-dev libheif-dev libperl-dev libjemalloc-dev libgoogle-perftools-dev
+            libltdl-dev libfftw3-dev liblcms2-dev liblqr-1-0-dev
+            libarchive-tools ccache
+        run: |
+          sudo apt install -y libunwind-dev
+          sudo apt install -y --no-install-recommends ${{ env.PACKAGES }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ matrix.os }}
+
+      - name: Build Imagemagick
+        id: build
+        run: |
+          bash -x build.sh
+
+      - name: Upload artifacts
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: magick-${{ matrix.os }}
+          path: ./**/magick*.tar.*
+
+  release:
+    if: false
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Get commit date
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "DATE=$(gh api repos/$REPO/commits/$SHA --jq '.commit.committer.date' | date -f - +%Y%m%d%H%M)" >> $GITHUB_ENV
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          prerelease: false
+          tag_name: latest
+          name: ${{ env.DATE }}
+          files: |
+            ./**/magick*.tar.*
