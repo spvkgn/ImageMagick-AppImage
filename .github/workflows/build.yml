@@ -6,10 +6,20 @@ on:
 
 jobs:
   build:
+    name: Q${{ matrix.quantum_depth }} HDRI=${{ matrix.hdri }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-22.04]
+        quantum_depth: [8, 16, 32]
+        hdri: [ON, OFF]
+        exclude:
+          - os: ubuntu-22.04
+            quantum_depth: 32
+            hdri: OFF
+          - os: ubuntu-22.04
+            quantum_depth: 8
+            hdri: ON
     steps:
       - name: Install build dependencies
         env:
@@ -19,10 +29,11 @@ jobs:
             libx11-dev libxext-dev libxt-dev
             libdjvulibre-dev libexif-dev libgd-dev libgraphviz-dev libjpeg-dev libopenjp2-7-dev libopenexr-dev
             libpng-dev libraw-dev libtiff-dev libwmf-dev libwebp-dev libpango1.0-dev librsvg2-bin librsvg2-dev
-            libxml2-dev libraqm-dev libheif-dev libperl-dev libjemalloc-dev libgoogle-perftools-dev
-            libltdl-dev libfftw3-dev liblcms2-dev liblqr-1-0-dev
-            libarchive-tools ccache
+            libxml2-dev libraqm-dev libheif-dev libgoogle-perftools-dev libltdl-dev libfftw3-dev
+            liblcms2-dev liblqr-1-0-dev libgif-dev freeglut3-dev libbrotli-dev
+            ccache libarchive-tools clang lld llvm
         run: |
+          sudo apt update -qq
           sudo apt install -y libunwind-dev
           sudo apt install -y --no-install-recommends ${{ env.PACKAGES }}
 
@@ -33,10 +44,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ matrix.os }}
+          key: ccache-${{ matrix.os }}-${{ matrix.quantum_depth }}-${{ matrix.hdri }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.os }}-${{ matrix.quantum_depth }}-${{ matrix.hdri }}-
 
-      - name: Build Imagemagick
+      - name: Build ImageMagick
         id: build
+        env:
+          QDEPTH: ${{ matrix.quantum_depth }}
+          HDRI: ${{ matrix.hdri }}
         run: |
           bash -x build.sh
 
@@ -44,11 +59,11 @@ jobs:
         if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: magick-${{ matrix.os }}
+          name: magick-${{ matrix.os }}-Q${{ matrix.quantum_depth }}-HDRI-${{ matrix.hdri }}
           path: ./**/magick*.tar.*
 
   release:
-    if: false
+    # if: false
     needs: build
     permissions:
       contents: write
@@ -57,20 +72,19 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
 
-      - name: Get commit date
+      - name: Get version
         env:
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "DATE=$(gh api repos/$REPO/commits/$SHA --jq '.commit.committer.date' | date -f - +%Y%m%d%H%M)" >> $GITHUB_ENV
+          echo "VERSION=$(gh api repos/ImageMagick/ImageMagick/releases/latest --jq '.tag_name')" >> $GITHUB_ENV
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: spvkgn/nightly-release@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          fail_on_unmatched_files: true
           prerelease: false
           tag_name: latest
-          name: ${{ env.DATE }}
+          name: ${{ env.VERSION }}
           files: |
             ./**/magick*.tar.*

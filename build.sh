@@ -7,6 +7,7 @@
 ##############################################################
 
 export CC="ccache gcc"
+export CXX="ccache g++"
 export LD="ccache ld"
 export AR="ccache ar"
 export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
@@ -74,18 +75,48 @@ build_brunsli() {
   cp -va out/artifacts/*.a $BUILD_DIR/usr/lib
 }
 
+build_jpeg-xl() {
+  cd "$WORK_DIR" && \
+  git clone https://github.com/libjxl/libjxl.git --recursive --shallow-submodules
+  mkdir -p libjxl/build
+  cmake -B libjxl/build -S libjxl \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$BUILD_DIR" \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DBUILD_TESTING=OFF \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DJPEGXL_ENABLE_BENCHMARK=OFF \
+    -DJPEGXL_ENABLE_COVERAGE=OFF \
+    -DJPEGXL_ENABLE_EXAMPLES=OFF \
+    -DJPEGXL_ENABLE_FUZZERS=OFF \
+    -DJPEGXL_ENABLE_PLUGINS=OFF \
+    -DJPEGXL_ENABLE_VIEWERS=OFF \
+    -DJPEGXL_WARNINGS_AS_ERRORS=OFF \
+    -DJPEGXL_FORCE_SYSTEM_BROTLI=ON \
+    -DJPEGXL_FORCE_SYSTEM_GTEST=ON \
+    -DJPEGXL_FORCE_SYSTEM_LCMS2=ON \
+    -DJPEGXL_BUNDLE_LIBPNG=OFF \
+    -Wno-dev
+  cmake --build libjxl/build --target install -- -j$(nproc) || exit 1
+}
+
 # ImageMagick
 build_imagemagick() {
+  if [[ "$HDRI" == "OFF" ]]; then
+    EXTRA_CONFIG_OPTS+=( "--disable-hdri" )
+  fi
   cd "$WORK_DIR" && \
-  wget -cO- https://imagemagick.org/download/ImageMagick.tar.gz | tar -xz
+  wget -cO- https://imagemagick.org/download/ImageMagick.tar.xz | tar -xJ
   cd ImageMagick-*/ && \
-  # wget -qO- "https://aur.archlinux.org/cgit/aur.git/plain/imagemagick-inkscape-1.0.patch?h=imagemagick-full" | patch -Np1 -i - && \
   autoreconf -fi && \
   CPPFLAGS=-I$BUILD_DIR/include \
   LDFLAGS=-L$BUILD_DIR/lib \
   PKG_CONFIG_PATH=$BUILD_DIR/lib/pkgconfig \
   ./configure \
-    --prefix="$BUILD_DIR" \
+    --prefix=/usr \
     --disable-shared \
     --disable-static \
     --disable-dependency-tracking \
@@ -93,23 +124,20 @@ build_imagemagick() {
     --enable-openmp \
     --enable-opencl \
     --enable-cipher \
-    --enable-hdri \
-    --without-threads \
+    --with-threads \
     --without-modules \
-    --with-jemalloc \
     --with-tcmalloc \
-    --with-umem \
     --with-bzlib \
     --with-x \
     --with-zlib \
     --with-zstd \
-    --with-autotrace \
     --without-dps \
     --with-fftw \
     --with-fpx \
     --with-djvu \
     --with-fontconfig \
     --with-freetype \
+    --with-quantum-depth=$QDEPTH \
     --with-raqm \
     --without-gslib \
     --with-gvc \
@@ -130,23 +158,23 @@ build_imagemagick() {
     --with-webp \
     --with-wmf \
     --with-xml \
+    ${EXTRA_CONFIG_OPTS[@]} \
     --with-fontpath=/usr/share/fonts/truetype \
-    --with-dejavu-font-dir=/usr/share/fonts/truetype/ttf-dejavu \
-    --with-gs-font-dir=/usr/share/fonts/type1/gsfonts && \
-  make -j$(nproc) install || exit 1
+    --with-dejavu-font-dir=/usr/share/fonts/truetype/dejavu \
+    --with-gs-font-dir=/usr/share/fonts/type1/gsfonts \
+    PSDelegate='/usr/bin/gs'
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make -j$(nproc) install DESTDIR=$GITHUB_WORKSPACE/AppDir || exit 1
 }
 
+build_jpeg-xl
 build_libfpx
 build_imagemagick
 
 cd $GITHUB_WORKSPACE && \
-if [ -x $BUILD_DIR/bin/magick ]; then
-  cp $BUILD_DIR/bin/magick . && \
-  strip magick
-  ./magick -version
-  tar -cJvf magick-$PLATFORM.tar.xz magick
-fi
+cp -va AppDir/usr/bin/magick . && \
+strip magick
+VERSION=$(./magick -version | grep -Po '^Version[\D]+\K.+Q\d+(-HDRI)?' | tr -s ' ' -)
+tar -cJvf magick-$VERSION-$PLATFORM.tar.xz magick
 
-ccache --show-stats || true
-
-exit 0
+ccache --show-stats
