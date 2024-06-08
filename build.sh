@@ -1,18 +1,17 @@
 #!/bin/bash
 
-##############################################################
-# Title          : build-imagemagick7.sh                     #
-# Description    : ImageMagick® 7 for Debian/Ubuntu,         #
-#                  including (nearly) full delegate support. #
-##############################################################
-
 export CC="ccache gcc"
 export CXX="ccache g++"
 export LD="ccache ld"
 export AR="ccache ar"
+# export CC="ccache clang"
+# export CXX="ccache clang++"
+# export LD="ccache ld.lld"
+# export AR="ccache llvm-ar"
+# export STRIP="llvm-strip"
 export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
 
-WORK_DIR=$GITHUB_WORKSPACE/work
+WORK_DIR=$HOME/work
 BUILD_DIR=$WORK_DIR/build
 mkdir -p "$BUILD_DIR"
 
@@ -27,8 +26,9 @@ case $ARCH in
 esac
 
 get_sources_github() {
-  REPO=$1
-  wget -cO- --header="Authorization: token $GH_TOKEN" "https://api.github.com/repos/$REPO/releases/latest" |\
+  local _repo
+  _repo=$1
+  wget -cO- --header="Authorization: token $GH_TOKEN" "https://api.github.com/repos/${_repo}/releases/latest" |\
     jq -r '.assets[] | select(.name | match("tar.(gz|xz)")) | .browser_download_url' |\
     xargs wget -cO- | bsdtar -x
 }
@@ -105,76 +105,90 @@ build_jpeg-xl() {
 
 # ImageMagick
 build_imagemagick() {
-  if [[ "$HDRI" == "OFF" ]]; then
-    EXTRA_CONFIG_OPTS+=( "--disable-hdri" )
+  if [[ $APPIMAGE == false ]]; then
+    CONFIG_ENV+=( "CPPFLAGS=-I$BUILD_DIR/include LDFLAGS=-L$BUILD_DIR/lib PKG_CONFIG_PATH=$BUILD_DIR/lib/pkgconfig" )
+    CONFIG_OPTS+=( "--disable-shared --enable-static" )
   fi
+  if [[ $HDRI == OFF ]]; then
+    CONFIG_OPTS+=( "--disable-hdri" )
+  fi
+  local _repo
+  _repo='ImageMagick/ImageMagick'
   cd "$WORK_DIR" && \
-  wget -cO- https://imagemagick.org/download/ImageMagick.tar.xz | tar -xJ
+  # wget -cO- https://imagemagick.org/download/ImageMagick.tar.xz | tar -xJ
+  # wget -qO- --header="Authorization: token $GH_TOKEN" "https://api.github.com/repos/${_repo}/releases/latest" |\
+  #   jq -r '.tag_name' | xargs -I{} wget -cO- https://github.com/${_repo}/archive/refs/tags/{}.tar.gz | tar -xz
+  gh api repos/${_repo}/releases/latest --jq '.tag_name' |\
+    xargs -I{} wget -qO- https://github.com/${_repo}/archive/refs/tags/{}.tar.gz | tar -xz
   cd ImageMagick-*/ && \
   autoreconf -fi && \
-  CPPFLAGS=-I$BUILD_DIR/include \
-  LDFLAGS=-L$BUILD_DIR/lib \
-  PKG_CONFIG_PATH=$BUILD_DIR/lib/pkgconfig \
-  ./configure \
+  ./configure ${CONFIG_ENV[@]} \
     --prefix=/usr \
-    --disable-shared \
     --disable-static \
     --disable-dependency-tracking \
-    --disable-docs \
-    --enable-openmp \
-    --enable-opencl \
     --enable-cipher \
-    --with-threads \
-    --without-modules \
-    --with-tcmalloc \
-    --with-bzlib \
-    --with-x \
-    --with-zlib \
-    --with-zstd \
-    --without-dps \
-    --with-fftw \
-    --with-fpx \
+    --enable-opencl \
     --with-djvu \
+    --with-fftw \
     --with-fontconfig \
     --with-freetype \
-    --with-quantum-depth=$QDEPTH \
-    --with-raqm \
-    --without-gslib \
     --with-gvc \
     --with-heic \
-    --with-jbig \
-    --with-jpeg \
     --with-jxl \
-    --with-lcms \
-    --with-openjp2 \
     --with-lqr \
-    --with-lzma \
     --with-openexr \
+    --with-openjp2 \
     --with-pango \
-    --with-png \
+    --with-quantum-depth=$QDEPTH \
+    --with-raqm \
     --with-raw \
     --with-rsvg \
-    --with-tiff \
+    --with-tcmalloc \
     --with-webp \
-    --with-wmf \
-    --with-xml \
-    ${EXTRA_CONFIG_OPTS[@]} \
-    --with-fontpath=/usr/share/fonts/truetype \
-    --with-dejavu-font-dir=/usr/share/fonts/truetype/dejavu \
-    --with-gs-font-dir=/usr/share/fonts/type1/gsfonts \
-    PSDelegate='/usr/bin/gs'
+    --with-zstd \
+    --without-dps \
+    --without-gslib \
+    --without-magick-plus-plus \
+    ${CONFIG_OPTS[@]} \
+    --with-dejavu-font-dir='/usr/share/fonts/truetype/dejavu' \
+    --with-fontpath='/usr/share/fonts/type1'
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make -j$(nproc) install DESTDIR=$GITHUB_WORKSPACE/AppDir || exit 1
+  make -j$(nproc) install-strip DESTDIR=$WORK_DIR/AppDir || exit 1
 }
 
-build_jpeg-xl
-build_libfpx
+if [[ $APPIMAGE == false ]]; then
+  build_jpeg-xl
+  build_libfpx
+fi
+
 build_imagemagick
 
-cd $GITHUB_WORKSPACE && \
-cp -va AppDir/usr/bin/magick . && \
-strip magick
-VERSION=$(./magick -version | grep -Po '^Version[\D]+\K.+Q\d+(-HDRI)?' | tr -s ' ' -)
-tar -cJvf magick-$VERSION-$PLATFORM.tar.xz magick
+cd $WORK_DIR && \
+VERSION=$(LD_LIBRARY_PATH=$PWD/AppDir/usr/lib AppDir/usr/bin/magick -version | grep -Po '^Version[\D]+\K.+Q\d+(-HDRI)?' | tr -s ' ' -)
+find AppDir/usr/lib -type f -name '*.la' -delete
+rm -rf AppDir/usr/include AppDir/usr/share/doc AppDir/usr/bin/*-config
 
-ccache --show-stats
+if [[ $APPIMAGE == false ]]; then
+  UBUNTU_ID=$(awk -F= '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '".')
+  tar -C AppDir/usr/bin -cJvf ImageMagick-$VERSION-$PLATFORM-ubuntu$UBUNTU_ID.tar.xz .
+elif [[ $APPIMAGE == true ]]; then
+  export APPIMAGE_EXTRACT_AND_RUN=1
+  mkdir -p AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/128x128/apps
+  install -vm644 ImageMagick-*/app-image/imagemagick.desktop AppDir/usr/share/applications/
+  install -vm644 ImageMagick-*/app-image/icon.png AppDir/usr/share/icons/hicolor/128x128/apps/imagemagick.png
+  install -vm755 $GITHUB_WORKSPACE/AppRun AppDir
+  for i in SHAREARCH_PATH CODER_PATH FILTER_PATH ; do
+    _value=$(find AppDir -type f -name 'configure.xml' | xargs xmlstarlet sel -t -m "configuremap/configure[@name='$i']" -v @value)
+    sed "s|@$i@|$_value|" -i AppDir/AppRun
+  done
+  # appimagetool with Squashfs zstd compression support and static runtime
+  wget -qO linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$ARCH.AppImage
+  wget -qO appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage
+  wget -qO runtime https://github.com/probonopd/static-tools/releases/download/2023/runtime-fuse2-$ARCH
+  chmod +x linuxdeploy appimagetool
+  NO_STRIP=1 DISABLE_COPYRIGHT_FILES_DEPLOYMENT=1 LD_LIBRARY_PATH=$PWD/AppDir/usr/lib ./linuxdeploy --appdir=AppDir && \
+  VERSION=$VERSION ./appimagetool -v --runtime-file runtime AppDir
+  # tar -cvf ImageMagick-$VERSION-$PLATFORM.AppImage.tar ImageMagick*.AppImage
+fi
+
+ccache --max-size=100M --show-stats

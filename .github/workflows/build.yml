@@ -2,40 +2,57 @@ name: build
 
 on:
   workflow_dispatch:
-  push:
+  # push:
 
 jobs:
   build:
-    name: Q${{ matrix.quantum_depth }} HDRI=${{ matrix.hdri }}
+    name: Q${{ matrix.quantum_depth }}${{ matrix.hdri == 'ON' && '-HDRI' || null }}${{ matrix.appimage == true && ' AppImage' || null }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-22.04]
         quantum_depth: [8, 16, 32]
         hdri: [ON, OFF]
+        appimage: [true, false]
         exclude:
           - os: ubuntu-22.04
             quantum_depth: 32
             hdri: OFF
+            appimage: false
           - os: ubuntu-22.04
             quantum_depth: 8
             hdri: ON
+            appimage: false
+          - os: ubuntu-22.04
+            quantum_depth: 32
+            hdri: OFF
+            appimage: true
+          - os: ubuntu-22.04
+            quantum_depth: 8
+            hdri: ON
+            appimage: true
     steps:
       - name: Install build dependencies
         env:
-          PACKAGES: >
-            fonts-dejavu-extra libfribidi-dev libfreetype-dev libfontconfig1-dev gsfonts ghostscript
-            zlib1g-dev liblzma-dev libbz2-dev libzstd-dev
-            libx11-dev libxext-dev libxt-dev
-            libdjvulibre-dev libexif-dev libgd-dev libgraphviz-dev libjpeg-dev libopenjp2-7-dev libopenexr-dev
-            libpng-dev libraw-dev libtiff-dev libwmf-dev libwebp-dev libpango1.0-dev librsvg2-bin librsvg2-dev
-            libxml2-dev libraqm-dev libheif-dev libgoogle-perftools-dev libltdl-dev libfftw3-dev
-            liblcms2-dev liblqr-1-0-dev libgif-dev freeglut3-dev libbrotli-dev
-            ccache libarchive-tools clang lld llvm
+          APPIMAGE: ${{ matrix.appimage }}
+          PACKAGES: >-
+            ccache libarchive-tools desktop-file-utils xmlstarlet
+            gsfonts ghostscript libfribidi-dev libgd-dev libgraphviz-dev libraw-dev libwebp-dev libopenjp2-7-dev
+            libpango1.0-dev libraqm-dev libheif-dev libgoogle-perftools-dev libfftw3-dev libgif-dev freeglut3-dev
+            zlib1g-dev libzstd-dev libpng-dev libtiff-dev libfreetype-dev libgsl-dev liblcms2-dev libharfbuzz-dev
         run: |
+          export DEBIAN_FRONTEND=noninteractive
+          if [[ $APPIMAGE == true ]]; then
+            CODENAME=$(awk -F= '/^VERSION_CODENAME=/ {print $2}' /etc/os-release)
+            # echo "deb [trusted=yes] http://ppa.launchpad.net/strukturag/libheif/ubuntu $CODENAME main" | sudo tee /etc/apt/sources.list.d/strukturag.list
+            # echo "deb [trusted=yes] http://ppa.launchpad.net/strukturag/libde265/ubuntu $CODENAME main" | sudo tee -a /etc/apt/sources.list.d/strukturag.list
+            echo "deb [trusted=yes] http://ppa.launchpad.net/savoury1/graphics/ubuntu $CODENAME main" | sudo tee /etc/apt/sources.list.d/ppa.list
+            PACKAGES="$PACKAGES libjxl-dev"
+          fi
           sudo apt update -qq
+          sudo apt remove nginx libgd3
           sudo apt install -y libunwind-dev
-          sudo apt install -y --no-install-recommends ${{ env.PACKAGES }}
+          sudo apt install -y --no-install-recommends $PACKAGES
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,14 +61,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ matrix.os }}-${{ matrix.quantum_depth }}-${{ matrix.hdri }}-${{ github.run_id }}
-          restore-keys: ccache-${{ matrix.os }}-${{ matrix.quantum_depth }}-${{ matrix.hdri }}-
+          key: ccache-${{ matrix.os }}${{ matrix.appimage == true && '-AppImage' || null }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.os }}${{ matrix.appimage == true && '-AppImage' || null }}-
 
       - name: Build ImageMagick
         id: build
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           QDEPTH: ${{ matrix.quantum_depth }}
           HDRI: ${{ matrix.hdri }}
+          APPIMAGE: ${{ matrix.appimage }}
         run: |
           bash -x build.sh
 
@@ -59,8 +78,11 @@ jobs:
         if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: magick-${{ matrix.os }}-Q${{ matrix.quantum_depth }}-HDRI-${{ matrix.hdri }}
-          path: ./**/magick*.tar.*
+          name: ${{ matrix.appimage == true && 'magick-AppImage' || 'magick' }}-Q${{ matrix.quantum_depth }}${{ matrix.hdri == 'ON' && '-HDRI' || null }}
+          path: |
+            ~/**/ImageMagick*.tar*
+            ~/**/ImageMagick*.AppImage
+          if-no-files-found: error
 
   release:
     # if: false
@@ -84,7 +106,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           prerelease: false
-          tag_name: latest
+          tag_name: ${{ env.VERSION }}
           name: ${{ env.VERSION }}
           files: |
-            ./**/magick*.tar.*
+            ./**/ImageMagick*.tar*
+            ./**/ImageMagick*.AppImage
