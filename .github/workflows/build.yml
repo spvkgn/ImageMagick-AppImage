@@ -2,7 +2,7 @@ name: build
 
 on:
   workflow_dispatch:
-  # push:
+  push:
 
 jobs:
   build:
@@ -10,25 +10,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04]
-        quantum_depth: [8, 16, 32]
-        hdri: [ON, OFF]
-        appimage: [true, false]
-        exclude:
+        # os: [ubuntu-22.04]
+        # quantum_depth: [8, 16, 32]
+        # hdri: [ON, OFF]
+        # appimage: [true, false]
+        # exclude:
+        #   - os: ubuntu-22.04
+        #     quantum_depth: 32
+        #     hdri: OFF
+        #     appimage: false
+        #   - os: ubuntu-22.04
+        #     quantum_depth: 8
+        #     hdri: ON
+        #     appimage: false
+        #   - os: ubuntu-22.04
+        #     quantum_depth: 32
+        #     hdri: OFF
+        #     appimage: true
+        #   - os: ubuntu-22.04
+        #     quantum_depth: 8
+        #     hdri: ON
+        #     appimage: true
+        include:
           - os: ubuntu-22.04
             quantum_depth: 32
-            hdri: OFF
-            appimage: false
-          - os: ubuntu-22.04
-            quantum_depth: 8
-            hdri: ON
-            appimage: false
-          - os: ubuntu-22.04
-            quantum_depth: 32
-            hdri: OFF
-            appimage: true
-          - os: ubuntu-22.04
-            quantum_depth: 8
             hdri: ON
             appimage: true
     steps:
@@ -44,10 +49,9 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           if [[ $APPIMAGE == true ]]; then
             CODENAME=$(awk -F= '/^VERSION_CODENAME=/ {print $2}' /etc/os-release)
-            # echo "deb [trusted=yes] http://ppa.launchpad.net/strukturag/libheif/ubuntu $CODENAME main" | sudo tee /etc/apt/sources.list.d/strukturag.list
-            # echo "deb [trusted=yes] http://ppa.launchpad.net/strukturag/libde265/ubuntu $CODENAME main" | sudo tee -a /etc/apt/sources.list.d/strukturag.list
             echo "deb [trusted=yes] http://ppa.launchpad.net/savoury1/graphics/ubuntu $CODENAME main" | sudo tee /etc/apt/sources.list.d/ppa.list
-            PACKAGES="$PACKAGES libjxl-dev"
+            echo "deb [trusted=yes] http://ppa.launchpad.net/spvkgn/graphics/ubuntu $CODENAME main" | sudo tee -a /etc/apt/sources.list.d/ppa.list
+            PACKAGES="$PACKAGES libjxl-dev libuhdr-dev"
           fi
           sudo apt update -qq
           sudo apt remove nginx libgd3
@@ -82,10 +86,10 @@ jobs:
           path: |
             ~/**/ImageMagick*.tar*
             ~/**/ImageMagick*.AppImage
-          if-no-files-found: error
+          # if-no-files-found: error
 
   release:
-    # if: false
+    if: false
     needs: build
     permissions:
       contents: write
