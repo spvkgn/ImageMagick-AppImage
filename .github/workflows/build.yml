@@ -44,10 +44,9 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           if [[ $APPIMAGE == true ]]; then
             CODENAME=$(awk -F= '/^VERSION_CODENAME=/ {print $2}' /etc/os-release)
-            # echo "deb [trusted=yes] http://ppa.launchpad.net/strukturag/libheif/ubuntu $CODENAME main" | sudo tee /etc/apt/sources.list.d/strukturag.list
-            # echo "deb [trusted=yes] http://ppa.launchpad.net/strukturag/libde265/ubuntu $CODENAME main" | sudo tee -a /etc/apt/sources.list.d/strukturag.list
             echo "deb [trusted=yes] http://ppa.launchpad.net/savoury1/graphics/ubuntu $CODENAME main" | sudo tee /etc/apt/sources.list.d/ppa.list
-            PACKAGES="$PACKAGES libjxl-dev"
+            echo "deb [trusted=yes] http://ppa.launchpad.net/spvkgn/graphics/ubuntu $CODENAME main" | sudo tee -a /etc/apt/sources.list.d/ppa.list
+            PACKAGES="$PACKAGES libjxl-dev libuhdr-dev"
           fi
           sudo apt update -qq
           sudo apt remove nginx libgd3

@@ -103,6 +103,23 @@ build_jpeg-xl() {
   cmake --build libjxl/build --target install -- -j$(nproc) || exit 1
 }
 
+build_libultrahdr() {
+  cd "$WORK_DIR" && \
+  git clone --depth 1 https://github.com/google/libultrahdr.git
+  mkdir -p libultrahdr/build
+  cmake -B libultrahdr/build -S libultrahdr \
+    -G "Unix Makefiles" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$BUILD_DIR" \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DUHDR_BUILD_EXAMPLES=OFF \
+    -Wno-dev
+  cmake --build libultrahdr/build --target install -- -j$(nproc) || exit 1
+}
+
 # ImageMagick
 build_imagemagick() {
   if [[ $APPIMAGE == false ]]; then
@@ -144,6 +161,7 @@ build_imagemagick() {
     --with-raw \
     --with-rsvg \
     --with-tcmalloc \
+    --with-uhdr \
     --with-webp \
     --with-zstd \
     --without-dps \
@@ -157,6 +175,7 @@ build_imagemagick() {
 }
 
 if [[ $APPIMAGE == false ]]; then
+  # build_libultrahdr
   build_jpeg-xl
   build_libfpx
 fi
