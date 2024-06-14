@@ -169,6 +169,7 @@ build_imagemagick() {
     --without-magick-plus-plus \
     ${CONFIG_OPTS[@]} \
     --with-dejavu-font-dir='/usr/share/fonts/truetype/dejavu' \
+    --with-urw-base35-font-dir='/usr/share/fonts/type1/urw-base35' \
     --with-fontpath='/usr/share/fonts/type1'
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make -j$(nproc) install-strip DESTDIR=$WORK_DIR/AppDir || exit 1
